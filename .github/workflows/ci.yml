@@ -13,6 +13,7 @@ jobs:
         with: {python-version: '3.12'}
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
+      - uses: aws-actions/setup-sam@v2
       - run: pip install -r requirements-dev.txt
       - run: python -m ruff check backend && python -m pytest
       - run: sam validate --lint && sam build --cached
