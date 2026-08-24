@@ -58,7 +58,7 @@ The registration ID is a UUIDv5 of normalized event ID + email. A transaction co
 - REST-stage throttle: 25 requests/sec sustained, burst 50. Add AWS WAF rate-based rules at a custom-domain/CloudFront edge when the public traffic/risk profile warrants its recurring cost.
 - Lambda roles are generated only with the table permissions each function requires; tables use AWS-owned encryption and point-in-time recovery.
 - The lookup endpoint is required by the specification and is publicly callable by email, which is an enumeration tradeoff. It intentionally returns no email/name. For production with personal data, add Cognito magic-link authentication (or a signed, emailed lookup token) and a WAF rate rule before broad exposure.
-- GitHub Actions uses OIDC (`AWS_DEPLOY_ROLE_ARN`), never long-lived access keys. Configure its trust policy for this repository and protected GitHub environments.
+- GitHub Actions uses environment-scoped `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets. These must belong to a dedicated least-privilege IAM user and be rotated; GitHub OIDC is the recommended future migration.
 
 Secrets must use Secrets Manager/SSM and never Vite variables; `VITE_*` values are public by design. This app has no runtime secrets.
 
@@ -96,7 +96,7 @@ sam deploy --config-env staging --parameter-overrides "Environment=staging Enabl
 sam deploy --config-env prod --parameter-overrides "Environment=prod EnableBudget=true BudgetAlertEmail=ops@example.com BudgetLimitUsd=25"
 ```
 
-The production workflow deploys from `main` to a protected GitHub environment after CI. It retrieves the deployed API/bucket/distribution outputs, builds the frontend with the API URL, uploads immutable assets and a no-cache `index.html`, then invalidates CloudFront. Configure repository/environment values `AWS_REGION`, optional `ENABLE_BUDGET` and `BUDGET_ALERT_EMAIL`; configure `AWS_DEPLOY_ROLE_ARN` as an environment secret. The role needs scoped CloudFormation/S3 artifact and frontend upload/Lambda/API Gateway/DynamoDB/IAM pass-role/CloudFront invalidation permissions for this stack only.
+The production workflow deploys from `main` to a protected GitHub environment after CI. It retrieves the deployed API/bucket/distribution outputs, builds the frontend with the API URL, uploads immutable assets and a no-cache `index.html`, then invalidates CloudFront. Configure repository/environment values `AWS_REGION`, optional `ENABLE_BUDGET` and `BUDGET_ALERT_EMAIL`; configure `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` as environment secrets. Use a dedicated least-privilege IAM user, scope it to this stack's CloudFormation/S3 artifact and frontend upload/Lambda/API Gateway/DynamoDB/IAM pass-role/CloudFront invalidation permissions, and rotate its credentials regularly. OIDC is preferable when your AWS account configuration is ready.
 
 ## Operations and cost
 
