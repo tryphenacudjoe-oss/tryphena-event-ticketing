@@ -63,9 +63,10 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
                     "Update": {
                         "TableName": events_table(),
                         "Key": {"event_id": record["event_id"]},
-                        "UpdateExpression": "SET available_seats = available_seats + :one, updated_at = :now",
-                        "ConditionExpression": "attribute_exists(event_id) AND available_seats < capacity",
-                        "ExpressionAttributeValues": {":one": {"N": "1"}, ":now": {"S": now}},
+                    "UpdateExpression": "SET available_seats = available_seats + :one, updated_at = :now",
+                    "ConditionExpression": "attribute_exists(event_id) AND available_seats < #capacity",
+                    "ExpressionAttributeNames": {"#capacity": "capacity"},
+                    "ExpressionAttributeValues": {":one": {"N": "1"}, ":now": {"S": now}},
                     }
                 },
             ]

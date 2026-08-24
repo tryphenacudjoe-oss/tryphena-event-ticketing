@@ -18,7 +18,7 @@ jobs:
       - run: python -m ruff check backend && python -m pytest
       - run: sam validate --lint && sam build --cached
       - working-directory: frontend
-        run: npm install && npm run build
+        run: npm ci && npm run build
       - name: Dependency review
         if: github.event_name == 'pull_request'
         uses: actions/dependency-review-action@v4

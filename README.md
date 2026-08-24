@@ -22,7 +22,7 @@ flowchart LR
   CW --> Alarms[Error-rate, 5XX, latency, throttle alarms]
 ```
 
-CloudFront is the public frontend URL: it serves the Vite build from a private, encrypted S3 bucket using Origin Access Control (OAC), redirects HTTP to HTTPS, compresses assets, and supports SPA routes. API Gateway provides HTTPS, throttling, access logs/metrics, and a narrow CORS policy. Lambda keeps compute pay-per-use and contains small, independently deployable operations. DynamoDB on-demand tables avoid capacity management; transactions make the seat counter safe under concurrency. CloudWatch provides operational evidence without logging registrant PII.
+CloudFront is the public frontend URL: it serves the Vite build from a private, encrypted S3 bucket using Origin Access Control (OAC), redirects HTTP to HTTPS, compresses assets, and supports SPA routes. API Gateway provides HTTPS, throttling, metrics, and a narrow CORS policy. Lambda keeps compute pay-per-use and contains small, independently deployable operations. DynamoDB on-demand tables avoid capacity management; transactions make the seat counter safe under concurrency. Lambda JSON logs and CloudWatch metrics provide operational evidence without logging registrant PII.
 
 ## API
 

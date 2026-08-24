@@ -90,6 +90,8 @@ def test_events_only_returns_public_shape(mock_db):
     }
     result = events(event(), None)
     assert result["statusCode"] == 200
+    assert "#c" in mock_db.return_value.scan.call_args.kwargs["ProjectionExpression"]
+    assert mock_db.return_value.scan.call_args.kwargs["ExpressionAttributeNames"]["#c"] == "capacity"
     assert body(result)["data"]["events"] == [
         {"event_id": "event-1", "name": "Event", "date": "2026-12-01"}
     ]

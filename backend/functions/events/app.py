@@ -31,8 +31,13 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         items: list[dict[str, Any]] = []
         scan_args: dict[str, Any] = {
             "TableName": events_table(),
-            "ProjectionExpression": "event_id, #n, description, #d, location, capacity, available_seats, #s",
-            "ExpressionAttributeNames": {"#n": "name", "#d": "date", "#s": "status"},
+            "ProjectionExpression": "event_id, #n, description, #d, location, #c, available_seats, #s",
+            "ExpressionAttributeNames": {
+                "#n": "name",
+                "#d": "date",
+                "#c": "capacity",
+                "#s": "status",
+            },
         }
         while True:
             result = dynamodb().scan(**scan_args)
@@ -47,8 +52,8 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         items.sort(key=lambda item: item.get("date", ""))
         log("events.list", event, count=len(items), status="OK")
         return response(event, 200, data={"events": [_event(item) for item in items]})
-    except ClientError:
-        log("events.failed", event, status="ERROR")
+    except ClientError as exc:
+        log("events.failed", event, status="ERROR", reason=exc.response["Error"]["Code"])
         return response(
             event, 503, error_code="SERVICE_UNAVAILABLE", error_message="Please try again shortly."
         )

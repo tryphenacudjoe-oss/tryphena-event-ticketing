@@ -44,8 +44,6 @@ Globals:
 Resources:
   WebBucket:
     Type: AWS::S3::Bucket
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
       BucketEncryption:
         ServerSideEncryptionConfiguration:
@@ -129,8 +127,6 @@ Resources:
         - ResourcePath: '/*'
           HttpMethod: '*'
           MetricsEnabled: true
-          LoggingLevel: INFO
-          DataTraceEnabled: false
           ThrottlingBurstLimit: 50
           ThrottlingRateLimit: 25
 
