@@ -31,10 +31,11 @@ def lambda_handler(event: dict[str, Any], _context: Any) -> dict[str, Any]:
         items: list[dict[str, Any]] = []
         scan_args: dict[str, Any] = {
             "TableName": events_table(),
-            "ProjectionExpression": "event_id, #n, description, #d, location, #c, available_seats, #s",
+            "ProjectionExpression": "event_id, #n, description, #d, #l, #c, available_seats, #s",
             "ExpressionAttributeNames": {
                 "#n": "name",
                 "#d": "date",
+                "#l": "location",
                 "#c": "capacity",
                 "#s": "status",
             },
