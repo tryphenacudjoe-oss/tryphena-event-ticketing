@@ -164,7 +164,7 @@ Resources:
       Policies:
         - Statement:
             Effect: Allow
-            Action: dynamodb:TransactWriteItems
+            Action: [dynamodb:PutItem, dynamodb:UpdateItem]
             Resource: [!GetAtt EventsTable.Arn, !GetAtt RegistrationsTable.Arn]
       Events:
         Register: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: /register, Method: post}}
@@ -203,7 +203,7 @@ Resources:
       Policies:
         - Statement:
             Effect: Allow
-            Action: [dynamodb:GetItem, dynamodb:TransactWriteItems]
+            Action: [dynamodb:GetItem, dynamodb:UpdateItem]
             Resource: [!GetAtt EventsTable.Arn, !GetAtt RegistrationsTable.Arn]
       Events:
         Cancellation: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: '/registration/{id}', Method: delete}}

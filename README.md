@@ -49,7 +49,7 @@ curl -X DELETE "$API/registration/<registration-id>"
 
 `EventsTable` has `event_id` as its key. It supports direct capacity updates and public discovery scans (appropriate for the small event catalogue; use a status/date access pattern if the catalogue grows). `RegistrationsTable` uses `registration_id` as the key and one justified `EmailIndex` GSI for lookup by email.
 
-The registration ID is a UUIDv5 of normalized event ID + email. A transaction conditionally decrements an `OPEN` event only when seats are positive and conditionally puts that ID. Therefore two requests for the final seat cannot both succeed, and duplicate event/email pairs cannot race. Cancellation transactionally changes `ACTIVE → CANCELLED` and increments capacity only below its original capacity. Repeated cancellation is a successful no-op.
+The registration ID is a UUIDv5 of normalized event ID + email. A transaction conditionally decrements an `OPEN` event only when seats are positive and conditionally puts that ID. Therefore two requests for the final seat cannot both succeed, and duplicate event/email pairs cannot race. Cancellation transactionally changes `ACTIVE → CANCELLED` and increments capacity only below its original capacity. Repeated cancellation is a successful no-op. DynamoDB authorizes transactions through the underlying `PutItem` and `UpdateItem` permissions, which are granted only to the two participating tables.
 
 ## Security
 
