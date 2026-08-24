@@ -1,0 +1,48 @@
+name: Deploy serverless application
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment: {description: 'Target environment', required: true, default: staging, type: choice, options: [dev, staging, prod]}
+permissions: {contents: read, id-token: write}
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/setup-sam@v2
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+      - run: sam build --cached
+      - run: sam deploy --config-env ${{ inputs.environment || 'staging' }} --no-confirm-changeset --parameter-overrides "EnableBudget=${{ vars.ENABLE_BUDGET || 'false' }} BudgetAlertEmail=${{ vars.BUDGET_ALERT_EMAIL || '' }}"
+      - name: Build and publish frontend
+        env:
+          STACK_NAME: event-ticketing-${{ inputs.environment || 'staging' }}
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue" --output text)
+          WEB_BUCKET=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FrontendBucketName'].OutputValue" --output text)
+          DISTRIBUTION_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDistributionId'].OutputValue" --output text)
+          cd frontend
+          VITE_API_BASE_URL="$API_URL" npm install
+          VITE_API_BASE_URL="$API_URL" npm run build
+          aws s3 sync dist "s3://$WEB_BUCKET" --delete --cache-control "public,max-age=31536000,immutable" --exclude index.html
+          aws s3 cp dist/index.html "s3://$WEB_BUCKET/index.html" --cache-control "no-cache,no-store,must-revalidate" --content-type "text/html"
+          aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*'
+      - name: Smoke test events endpoint
+        run: |
+          API_URL=$(aws cloudformation describe-stacks --stack-name event-ticketing-${{ inputs.environment || 'staging' }} --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue" --output text)
+          curl --fail --retry 3 "$API_URL/events"
+      - name: Publish deployment URLs
+        run: |
+          STACK_NAME=event-ticketing-${{ inputs.environment || 'staging' }}
+          API_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='ApiBaseUrl'].OutputValue" --output text)
+          FRONTEND_URL=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='FrontendUrl'].OutputValue" --output text)
+          echo "### Deployment complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Frontend: $FRONTEND_URL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- API: $API_URL" >> "$GITHUB_STEP_SUMMARY"

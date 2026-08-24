@@ -1,0 +1,13 @@
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+pythonpath = ["backend"]
+addopts = "-q --cov=backend/functions --cov=backend/shared --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = [".aws-sam"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]

@@ -1,0 +1,334 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Secure, serverless Event Registration & Ticketing System
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+  AllowedOrigin:
+    Type: String
+    Default: ''
+    Description: Optional exact custom frontend origin. Defaults to this stack's CloudFront URL.
+  BudgetLimitUsd:
+    Type: Number
+    Default: 10
+    MinValue: 1
+  BudgetAlertEmail:
+    Type: String
+    Default: ''
+  EnableBudget:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+Conditions:
+  CreateBudget: !Equals [!Ref EnableBudget, 'true']
+  HasExplicitOrigin: !Not [!Equals [!Ref AllowedOrigin, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    CodeUri: backend/
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+    LoggingConfig: {LogFormat: JSON, ApplicationLogLevel: INFO, SystemLogLevel: WARN}
+    Environment:
+      Variables:
+        EVENTS_TABLE: !Ref EventsTable
+        REGISTRATIONS_TABLE: !Ref RegistrationsTable
+        ALLOWED_ORIGINS: !If [HasExplicitOrigin, !Ref AllowedOrigin, !Sub 'https://${WebDistribution.DomainName}']
+
+Resources:
+  WebBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  WebOriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub 'event-ticketing-web-${Environment}'
+        Description: CloudFront-only access to the private frontend bucket.
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  WebDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: !Sub 'Event ticketing frontend (${Environment})'
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        PriceClass: PriceClass_100
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !GetAtt WebBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt WebOriginAccessControl.Id
+            S3OriginConfig: {OriginAccessIdentity: ''}
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD, OPTIONS]
+          Compress: true
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 0
+
+  WebBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref WebBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontReadOnly
+            Effect: Allow
+            Principal: {Service: cloudfront.amazonaws.com}
+            Action: s3:GetObject
+            Resource: !Sub '${WebBucket.Arn}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebDistribution}'
+
+  EventApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub event-ticketing-${Environment}
+      StageName: !Ref Environment
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+      Cors:
+        AllowOrigin: !If [HasExplicitOrigin, !Sub "'${AllowedOrigin}'", !Sub "'https://${WebDistribution.DomainName}'"]
+        AllowHeaders: "'Content-Type,X-Request-Id'"
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        MaxAge: "'600'"
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          MetricsEnabled: true
+          LoggingLevel: INFO
+          DataTraceEnabled: false
+          ThrottlingBurstLimit: 50
+          ThrottlingRateLimit: 25
+
+  EventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub event-ticketing-events-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: event_id, AttributeType: S}]
+      KeySchema: [{AttributeName: event_id, KeyType: HASH}]
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  RegistrationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub event-ticketing-registrations-${Environment}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: registration_id, AttributeType: S}
+        - {AttributeName: email, AttributeType: S}
+      KeySchema: [{AttributeName: registration_id, KeyType: HASH}]
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema: [{AttributeName: email, KeyType: HASH}]
+          Projection: {ProjectionType: INCLUDE, NonKeyAttributes: [event_id, status, ticket_id, created_at]}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions.register.app.lambda_handler
+      Description: Validates and atomically creates an event registration.
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: dynamodb:TransactWriteItems
+            Resource: [!GetAtt EventsTable.Arn, !GetAtt RegistrationsTable.Arn]
+      Events:
+        Register: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: /register, Method: post}}
+
+  EventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions.events.app.lambda_handler
+      Description: Returns public event discovery data.
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: dynamodb:Scan
+            Resource: !GetAtt EventsTable.Arn
+      Events:
+        Events: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: /events, Method: get}}
+
+  RegistrationsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions.registrations.app.lambda_handler
+      Description: Looks up privacy-minimised registrations by email.
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: dynamodb:Query
+            Resource: !Sub '${RegistrationsTable.Arn}/index/EmailIndex'
+      Events:
+        Registrations: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: '/registrations/{email}', Method: get}}
+
+  CancellationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: functions.cancellation.app.lambda_handler
+      Description: Idempotently cancels a registration and restores capacity.
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:TransactWriteItems]
+            Resource: [!GetAtt EventsTable.Arn, !GetAtt RegistrationsTable.Arn]
+      Events:
+        Cancellation: {Type: Api, Properties: {RestApiId: !Ref EventApi, Path: '/registration/{id}', Method: delete}}
+
+  LambdaErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${Environment}: Lambda error percentage has exceeded 5%.'
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: 1
+      Threshold: 5
+      TreatMissingData: notBreaching
+      Metrics:
+        - Id: e1
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{Name: FunctionName, Value: !Ref RegisterFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: i1
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Invocations, Dimensions: [{Name: FunctionName, Value: !Ref RegisterFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: e2
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{Name: FunctionName, Value: !Ref EventsFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: i2
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Invocations, Dimensions: [{Name: FunctionName, Value: !Ref EventsFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: e3
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{Name: FunctionName, Value: !Ref RegistrationsFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: i3
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Invocations, Dimensions: [{Name: FunctionName, Value: !Ref RegistrationsFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: e4
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Errors, Dimensions: [{Name: FunctionName, Value: !Ref CancellationFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: i4
+          MetricStat: {Metric: {Namespace: AWS/Lambda, MetricName: Invocations, Dimensions: [{Name: FunctionName, Value: !Ref CancellationFunction}]}, Period: 300, Stat: Sum}
+          ReturnData: false
+        - Id: error_rate
+          Expression: MAX([IF(i1>0,e1/i1*100,0),IF(i2>0,e2/i2*100,0),IF(i3>0,e3/i3*100,0),IF(i4>0,e4/i4*100,0)])
+          Label: Worst Lambda error rate
+          ReturnData: true
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${Environment}: API Gateway returned 5XX errors.'
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'event-ticketing-${Environment}'
+        - Name: Stage
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ApiLatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${Environment}: API p95 latency exceeds 2 seconds.'
+      Namespace: AWS/ApiGateway
+      MetricName: Latency
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'event-ticketing-${Environment}'
+        - Name: Stage
+          Value: !Ref Environment
+      ExtendedStatistic: p95
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 2000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  ApiThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub '${Environment}: API Gateway throttling detected.'
+      Namespace: AWS/ApiGateway
+      MetricName: Throttle
+      Dimensions:
+        - Name: ApiName
+          Value: !Sub 'event-ticketing-${Environment}'
+        - Name: Stage
+          Value: !Ref Environment
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Condition: CreateBudget
+    Properties:
+      Budget:
+        BudgetName: !Sub event-ticketing-${Environment}-monthly
+        BudgetLimit: {Amount: !Ref BudgetLimitUsd, Unit: USD}
+        TimeUnit: MONTHLY
+        BudgetType: COST
+      NotificationsWithSubscribers:
+        - Notification: {NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 80, ThresholdType: PERCENTAGE}
+          Subscribers: [{SubscriptionType: EMAIL, Address: !Ref BudgetAlertEmail}]
+
+Outputs:
+  FrontendUrl:
+    Description: CloudFront URL serving the frontend.
+    Value: !Sub 'https://${WebDistribution.DomainName}'
+  FrontendBucketName:
+    Description: Private S3 bucket used only as the CloudFront origin.
+    Value: !Ref WebBucket
+  CloudFrontDistributionId:
+    Description: Distribution ID for CI/CD invalidation.
+    Value: !Ref WebDistribution
+  ApiBaseUrl:
+    Description: Public API base URL.
+    Value: !Sub 'https://${EventApi}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+  EventsTableName: {Value: !Ref EventsTable}
+  RegistrationsTableName: {Value: !Ref RegistrationsTable}

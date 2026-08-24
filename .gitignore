@@ -1,0 +1,10 @@
+.aws-sam/
+.pytest_cache/
+pytest-cache-files-*/
+.coverage
+__pycache__/
+*.py[cod]
+.env
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local

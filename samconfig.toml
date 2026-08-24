@@ -1,0 +1,29 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[dev.deploy.parameters]
+stack_name = "event-ticketing-dev"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+parameter_overrides = "Environment=dev EnableBudget=false"
+
+[staging.deploy.parameters]
+stack_name = "event-ticketing-staging"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+parameter_overrides = "Environment=staging EnableBudget=false"
+
+[prod.deploy.parameters]
+stack_name = "event-ticketing-prod"
+resolve_s3 = true
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+parameter_overrides = "Environment=prod EnableBudget=false"

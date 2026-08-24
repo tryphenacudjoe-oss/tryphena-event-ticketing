@@ -1,0 +1,6 @@
+[
+  {"event_id":"aws-workshop-accra-2026","name":"AWS Workshop Accra 2026","description":"A hands-on day of cloud architecture, serverless patterns, and networking.","date":"2026-11-15T09:00:00Z","location":"Impact Hub, Accra","capacity":80,"available_seats":80,"status":"OPEN"},
+  {"event_id":"cloud-solutions-summit","name":"Cloud Solutions Summit","description":"Practical talks from builders solving real infrastructure challenges.","date":"2026-12-05T10:00:00Z","location":"Kempinski Hotel, Accra","capacity":120,"available_seats":18,"status":"OPEN"},
+  {"event_id":"serverless-community-night","name":"Serverless Community Night","description":"A relaxed evening of lightning talks and conversations with local builders.","date":"2027-01-22T18:00:00Z","location":"East Legon, Accra","capacity":50,"available_seats":0,"status":"OPEN"}
+]
+
